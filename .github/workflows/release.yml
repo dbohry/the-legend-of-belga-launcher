@@ -1,0 +1,140 @@
+name: Build & Release JAR
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+# Avoid double-runs if multiple pushes happen quickly
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    # Do nothing on the automated bump commit
+    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Gradle wrapper perms
+        run: chmod +x gradlew
+
+      - name: Resolve & bump version (0.0.X)
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags
+
+          # Read current Gradle version
+          CURR="$(./gradlew -q properties | awk -F': ' '/^version: /{print $2}')"
+          echo "Current Gradle version: ${CURR}"
+
+          # Extract numeric MAJOR.MINOR.PATCH (strip -SNAPSHOT etc.)
+          NUM="$(echo "$CURR" | sed -E 's/[^0-9.].*$//')"
+          IFS='.' read -r MAJ MIN PATCH <<< "${NUM:-0.0.0}"
+          MAJ=${MAJ:-0}; MIN=${MIN:-0}; PATCH=${PATCH:-0}
+
+          # Find latest existing tag for MAJ.MIN.*
+          LATEST_TAG_PATCH="$(git tag -l "v${MAJ}.${MIN}.*" \
+            | sed -E "s/^v${MAJ}\.${MIN}\.([0-9]+).*$/\1/" \
+            | sort -n | tail -1 || true)"
+          LATEST_TAG_PATCH=${LATEST_TAG_PATCH:-0}
+
+          # Next patch = max(current patch, latest tag patch) + 1
+          if [ "${PATCH}" -gt "${LATEST_TAG_PATCH}" ]; then
+            NEXT_PATCH=$((PATCH + 1))
+          else
+            NEXT_PATCH=$((LATEST_TAG_PATCH + 1))
+          fi
+
+          NEW_VERSION="${MAJ}.${MIN}.${NEXT_PATCH}"
+          echo "Bumping to: ${NEW_VERSION}"
+          echo "VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+
+          # Only rewrite files if needed
+          if [ "$CURR" != "$NEW_VERSION" ]; then
+            UPDATED=0
+            if [ -f gradle.properties ]; then
+              sed -i -E "s/^version\s*=.*/version=${NEW_VERSION}/" gradle.properties && UPDATED=1
+            fi
+            if [ -f build.gradle ]; then
+              # Groovy DSL
+              if grep -qE "^[[:space:]]*version[[:space:]]*=" build.gradle; then
+                sed -i -E "s/^[[:space:]]*version[[:space:]]*=.*/version = '${NEW_VERSION}'/" build.gradle && UPDATED=1
+              fi
+            fi
+            if [ -f build.gradle.kts ]; then
+              # Kotlin DSL
+              if grep -qE "^[[:space:]]*version[[:space:]]*=" build.gradle.kts; then
+                sed -i -E "s/^[[:space:]]*version[[:space:]]*=.*/version = \"${NEW_VERSION}\"/" build.gradle.kts && UPDATED=1
+              fi
+            fi
+
+            if [ "$UPDATED" -ne 1 ]; then
+              echo "ERROR: Could not update version in Gradle files."
+              exit 1
+            fi
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+            git push
+          fi
+
+      - name: Build JAR
+        run: ./gradlew clean jar
+
+      - name: Determine JAR path
+        id: jarpath
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE="build/libs/*-${VERSION}.jar"
+          FILES=( $CANDIDATE )
+          if [ ! -e "${FILES[0]}" ]; then
+            FILES=( build/libs/*.jar )
+          fi
+          if [ ! -e "${FILES[0]}" ]; then
+            echo "No JAR found in build/libs"; exit 1
+          fi
+          echo "JAR_PATH=${FILES[0]}" >> $GITHUB_ENV
+          echo "Jar: ${FILES[0]}"
+
+      - name: Create & push tag if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists"
+          else
+            git tag -a "v${VERSION}" -m "v${VERSION}"
+            git push origin "v${VERSION}"
+          fi
+
+      - name: Create release and upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          files: ${{ env.JAR_PATH }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

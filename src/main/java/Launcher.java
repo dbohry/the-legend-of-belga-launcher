@@ -86,14 +86,18 @@ public class Launcher extends JFrame {
         setLocationRelativeTo(null);
 
         // Ensure folders exist
-        try { Files.createDirectories(HOME_DIR); } catch (IOException ignored) {}
+        try {
+            Files.createDirectories(HOME_DIR);
+        } catch (IOException ignored) {
+        }
 
         loadLocalVersion();
         checkLatestRelease();
 
         // Also cleanly stop worker on window close (extra safety)
         addWindowListener(new java.awt.event.WindowAdapter() {
-            @Override public void windowClosing(java.awt.event.WindowEvent e) {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
                 exec.shutdownNow();
             }
         });
@@ -121,7 +125,6 @@ public class Launcher extends JFrame {
             p.setProperty("path", GAME_JAR.toString());
             p.store(out, "TLOB installed version");
         } catch (IOException e) {
-            // non-fatal
         }
     }
 
@@ -136,7 +139,6 @@ public class Launcher extends JFrame {
                     .timeout(Duration.ofSeconds(20))
                     .GET().build();
 
-                // Optional: increase rate limit if user has GH token
                 String token = System.getenv("GITHUB_TOKEN");
                 if (token != null && !token.isBlank()) {
                     req = HttpRequest.newBuilder(URI.create(API_LATEST))
