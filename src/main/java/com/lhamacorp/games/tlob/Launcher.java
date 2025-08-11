@@ -1,3 +1,5 @@
+package com.lhamacorp.games.tlob;
+
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
@@ -22,7 +24,7 @@ public class Launcher extends JFrame {
     // --- Config ---
     private static final String REPO = "dbohry/the-legend-of-belga";
     private static final String API_LATEST = "https://api.github.com/repos/" + REPO + "/releases/latest";
-    private static final String USER_AGENT = "TLOB-Launcher/1.0 (+https://github.com/" + REPO + ")";
+    private static final String USER_AGENT = "TLOB-com.lhamacorp.games.tlob.Launcher/1.0 (+https://github.com/" + REPO + ")";
     private static final Path HOME_DIR = Path.of(System.getProperty("user.home"), ".tlob");
     private static final Path INSTALLED_PROPS = HOME_DIR.resolve("installed.properties");
     private static final Path GAME_JAR = HOME_DIR.resolve("game.jar");
@@ -55,7 +57,7 @@ public class Launcher extends JFrame {
     }
 
     public Launcher() {
-        super("The Legend of Belga — Launcher");
+        super("The Legend of Belga — com.lhamacorp.games.tlob.Launcher");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         setSize(460, 220);
         setLayout(new BorderLayout(12, 12));
