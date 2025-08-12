@@ -49,7 +49,6 @@ public class Launcher extends JFrame {
         t.setDaemon(true);
         return t;
     });
-
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(15))
         .followRedirects(HttpClient.Redirect.NORMAL)
@@ -90,8 +89,8 @@ public class Launcher extends JFrame {
 
         btnQuit.addActionListener(e -> System.exit(0));
         btnPlay.addActionListener(e -> launchGame());
-        btnUpdate.addActionListener(e -> startUpdateGame());
-        btnUpdateLauncher.addActionListener(e -> startUpdateLauncher());
+        btnUpdate.addActionListener(e -> startUpdate(true));
+        btnUpdateLauncher.addActionListener(e -> startUpdate(false));
 
         btns.add(btnPlay);
         btns.add(btnUpdate);
@@ -100,25 +99,184 @@ public class Launcher extends JFrame {
 
         add(panel, BorderLayout.CENTER);
         add(btns, BorderLayout.SOUTH);
-
-        // Center on screen
         setLocationRelativeTo(null);
 
-        // Ensure folders exist
-        try { Files.createDirectories(HOME_DIR); } catch (IOException ignored) {}
+        try {
+            Files.createDirectories(HOME_DIR);
+        } catch (IOException ignored) {
+        }
 
         loadLocalVersion();
         loadLauncherLocalVersion();
 
-        checkLatestGameRelease();
-        checkLatestLauncherRelease();
+        checkLatest(true);   // game
+        checkLatest(false);  // launcher
 
         addWindowListener(new java.awt.event.WindowAdapter() {
-            @Override public void windowClosing(java.awt.event.WindowEvent e) { exec.shutdown(); }
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                exec.shutdown();
+            }
         });
     }
 
-    // ------------------------ Game update flow ------------------------
+    // ------------------------ Game & Launcher flows (merged) ------------------------
+
+    private void checkLatest(boolean game) {
+        if (game) {
+            btnPlay.setEnabled(Files.exists(GAME_JAR));
+            bar.setIndeterminate(true);
+        }
+
+        exec.submit(() -> {
+            try {
+                String api = game ? API_LATEST : API_LAUNCHER_LATEST;
+                String json = httpGetString(api);
+                String ver = extract(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
+                String url = extractFirstJarUrl(json);
+
+                if (game) {
+                    latestVersion = ver;
+                    latestJarUrl = url;
+                } else {
+                    launcherLatestVersion = ver;
+                    launcherLatestJarUrl = url;
+                }
+
+                ui(() -> {
+                    if (ver == null || url == null) {
+                        if (game) {
+                            status.setText("Could not find latest game .jar asset.");
+                            bar.setIndeterminate(false);
+                            bar.setValue(0);
+                            btnUpdate.setEnabled(false);
+                            btnPlay.setEnabled(Files.exists(GAME_JAR));
+                        } else btnUpdateLauncher.setEnabled(false);
+                        return;
+                    }
+                    if (game) {
+                        boolean newer = isNewer(ver, localVersion) || !Files.exists(GAME_JAR);
+                        btnUpdate.setEnabled(newer);
+                        btnPlay.setEnabled(Files.exists(GAME_JAR));
+                        bar.setIndeterminate(false);
+                        bar.setValue(newer ? 0 : 100);
+                        if (!newer) bar.setString("Game up to date");
+                    } else {
+                        boolean newer = isNewer(ver, launcherLocalVersion);
+                        btnUpdateLauncher.setEnabled(newer);
+                        if (!newer && bar.isIndeterminate()) {
+                            bar.setIndeterminate(false);
+                            bar.setValue(100);
+                            bar.setString("Up to date");
+                        }
+                    }
+                });
+            } catch (Exception ex) {
+                ui(() -> {
+                    if (game) {
+                        status.setText("Offline or API error. You can still play offline if installed.");
+                        bar.setIndeterminate(false);
+                        btnPlay.setEnabled(Files.exists(GAME_JAR));
+                        btnUpdate.setEnabled(false);
+                    } else btnUpdateLauncher.setEnabled(false);
+                });
+            }
+        });
+    }
+
+    private void startUpdate(boolean game) {
+        if (game) {
+            btnUpdate.setEnabled(false);
+            btnPlay.setEnabled(false);
+            bar.setIndeterminate(true);
+            bar.setString(null);
+            status.setText("Downloading game " + latestVersion + "…");
+        } else {
+            btnUpdateLauncher.setEnabled(false);
+            bar.setIndeterminate(true);
+            bar.setString(null);
+            status.setText("Downloading launcher " + launcherLatestVersion + "…");
+        }
+
+        exec.submit(() -> {
+            Path tmp = null;
+            try {
+                String url = game ? latestJarUrl : launcherLatestJarUrl;
+                if (url == null) throw new IOException("No " + (game ? "game" : "launcher") + " asset URL.");
+
+                tmp = downloadToTemp(url, game ? "tlob-" : "tlob-launcher-");
+
+                Files.createDirectories(HOME_DIR);
+
+                if (!game) {
+                    Path self = getSelfJarPath();
+                    if (self != null && Files.isRegularFile(self) && Files.isSameFile(self, LAUNCHER_JAR)) {
+                        Path staged = HOME_DIR.resolve("launcher.jar.new");
+                        Files.move(tmp, staged, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+
+                        ui(() -> {
+                            status.setText("Updating launcher… restarting.");
+                            bar.setIndeterminate(true);
+                        });
+                        writeAndRunSelfReplaceScript(staged, LAUNCHER_JAR, findJava());
+                        ui(() -> {
+                            exec.shutdown();
+                            setVisible(false);
+                            dispose();
+                            System.exit(0);
+                        });
+                        return;
+                    }
+                    Files.move(tmp, LAUNCHER_JAR, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                    ui(() -> {
+                        status.setText("Launcher installed. Restarting updated launcher…");
+                        bar.setValue(100);
+                        bar.setString("Done");
+                    });
+                    new ProcessBuilder(findJava(), "-jar", LAUNCHER_JAR.toString()).directory(HOME_DIR.toFile()).inheritIO().start();
+                    ui(() -> {
+                        exec.shutdown();
+                        setVisible(false);
+                        dispose();
+                        System.exit(0);
+                    });
+                    return;
+                }
+
+                // game
+                Files.move(tmp, GAME_JAR, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                saveLocalGameVersion(latestVersion);
+                ui(() -> {
+                    status.setText("Installed game " + latestVersion + ". Ready to play.");
+                    bar.setValue(100);
+                    bar.setString("Done");
+                    btnPlay.setEnabled(true);
+                });
+
+            } catch (Exception ex) {
+                if (tmp != null) try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                }
+                ui(() -> {
+                    if (game) {
+                        status.setText("Game download failed: " + ex.getMessage());
+                        btnUpdate.setEnabled(true);
+                        btnPlay.setEnabled(Files.exists(GAME_JAR));
+                    } else {
+                        status.setText("Launcher update failed: " + ex.getMessage());
+                        btnUpdateLauncher.setEnabled(true);
+                    }
+                    if (bar.isIndeterminate()) {
+                        bar.setIndeterminate(false);
+                        bar.setValue(0);
+                    }
+                });
+            }
+        });
+    }
+
+    // ------------------------ Local versions & launch ------------------------
 
     private void loadLocalVersion() {
         if (Files.exists(INSTALLED_PROPS)) {
@@ -126,7 +284,8 @@ public class Launcher extends JFrame {
                 var p = new Properties();
                 p.load(in);
                 localVersion = p.getProperty("version", localVersion);
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }
         status.setText("Installed game: " + localVersion + " — checking for updates…");
     }
@@ -137,271 +296,138 @@ public class Launcher extends JFrame {
             p.setProperty("version", version);
             p.setProperty("path", GAME_JAR.toString());
             p.store(out, "TLOB installed version");
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
     }
-
-    private void checkLatestGameRelease() {
-        btnPlay.setEnabled(Files.exists(GAME_JAR));
-        bar.setIndeterminate(true);
-
-        exec.submit(() -> {
-            try {
-                HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(API_LATEST))
-                    .header("User-Agent", USER_AGENT)
-                    .timeout(Duration.ofSeconds(20))
-                    .GET();
-
-                String token = System.getenv("GITHUB_TOKEN");
-                if (token != null && !token.isBlank()) {
-                    b.header("Authorization", "Bearer " + token.trim());
-                }
-
-                var resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() != 200) throw new IOException("GitHub API " + resp.statusCode());
-
-                String json = resp.body();
-                latestVersion = extract(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-                latestJarUrl  = extractFirstJarUrl(json);
-
-                SwingUtilities.invokeLater(() -> {
-                    if (latestVersion == null || latestJarUrl == null) {
-                        status.setText("Could not find latest game .jar asset.");
-                        bar.setIndeterminate(false);
-                        bar.setValue(0);
-                        btnUpdate.setEnabled(false);
-                        btnPlay.setEnabled(Files.exists(GAME_JAR));
-                        return;
-                    }
-                    boolean newer = isNewer(latestVersion, localVersion) || !Files.exists(GAME_JAR);
-                    btnUpdate.setEnabled(newer);
-                    btnPlay.setEnabled(Files.exists(GAME_JAR));
-                    bar.setIndeterminate(false);
-                    bar.setValue(newer ? 0 : 100);
-                    if (!newer) bar.setString("Game up to date");
-                });
-
-            } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> {
-                    status.setText("Offline or API error. You can still play offline if installed.");
-                    bar.setIndeterminate(false);
-                    btnPlay.setEnabled(Files.exists(GAME_JAR));
-                    btnUpdate.setEnabled(false);
-                });
-            }
-        });
-    }
-
-    private void startUpdateGame() {
-        btnUpdate.setEnabled(false);
-        btnPlay.setEnabled(false);
-        bar.setIndeterminate(true);
-        bar.setString(null);
-        status.setText("Downloading game " + latestVersion + "…");
-
-        exec.submit(() -> {
-            Path tmp = null;
-            try {
-                if (latestJarUrl == null) throw new IOException("No game asset URL.");
-                tmp = Files.createTempFile("tlob-", ".jar.part");
-
-                long contentLen = contentLength(latestJarUrl);
-                SwingUtilities.invokeLater(() -> {
-                    if (contentLen > 0) { bar.setIndeterminate(false); bar.setValue(0); }
-                });
-
-                var req = HttpRequest.newBuilder(URI.create(latestJarUrl))
-                    .header("User-Agent", USER_AGENT)
-                    .timeout(Duration.ofMinutes(5))
-                    .GET().build();
-
-                Path finalTmp = tmp;
-                http.send(req, HttpResponse.BodyHandlers.ofInputStream()).body().transferTo(new OutputStream() {
-                    long read = 0;
-                    final OutputStream out = Files.newOutputStream(finalTmp, StandardOpenOption.TRUNCATE_EXISTING);
-
-                    @Override public void write(int b) throws IOException {
-                        out.write(b);
-                        if (contentLen > 0 && (++read % 8192 == 0)) updateProgress(read, contentLen);
-                    }
-                    @Override public void write(byte[] b, int off, int len) throws IOException {
-                        out.write(b, off, len);
-                        if (contentLen > 0) { read += len; updateProgress(read, contentLen); }
-                    }
-                    @Override public void close() throws IOException { out.close(); }
-                });
-
-                Files.createDirectories(HOME_DIR);
-                Files.move(tmp, GAME_JAR, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-                saveLocalGameVersion(latestVersion);
-
-                SwingUtilities.invokeLater(() -> {
-                    status.setText("Installed game " + latestVersion + ". Ready to play.");
-                    bar.setValue(100);
-                    bar.setString("Done");
-                    btnPlay.setEnabled(true);
-                });
-
-            } catch (Exception ex) {
-                if (tmp != null) try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
-                SwingUtilities.invokeLater(() -> {
-                    status.setText("Game download failed: " + ex.getMessage());
-                    btnUpdate.setEnabled(true);
-                    btnPlay.setEnabled(Files.exists(GAME_JAR));
-                    bar.setIndeterminate(false);
-                    bar.setValue(0);
-                });
-            }
-        });
-    }
-
-    // ------------------------ Launcher self-update flow ------------------------
 
     private void loadLauncherLocalVersion() {
-        String v = getClass().getPackage() != null
-            ? getClass().getPackage().getImplementationVersion()
-            : null;
+        String v = getClass().getPackage() != null ? getClass().getPackage().getImplementationVersion() : null;
         if (v != null && !v.isBlank()) launcherLocalVersion = v.trim();
     }
 
-    private void checkLatestLauncherRelease() {
-        exec.submit(() -> {
-            try {
-                HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(API_LAUNCHER_LATEST))
-                    .header("User-Agent", USER_AGENT)
-                    .timeout(Duration.ofSeconds(20))
-                    .GET();
-
-                String token = System.getenv("GITHUB_TOKEN");
-                if (token != null && !token.isBlank()) {
-                    b.header("Authorization", "Bearer " + token.trim());
-                }
-
-                var resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() != 200) throw new IOException("GitHub API " + resp.statusCode());
-
-                String json = resp.body();
-                launcherLatestVersion = extract(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-                launcherLatestJarUrl  = extractFirstJarUrl(json);
-
-                SwingUtilities.invokeLater(() -> {
-                    boolean newer = launcherLatestVersion != null
-                        && launcherLatestJarUrl != null
-                        && isNewer(launcherLatestVersion, launcherLocalVersion);
-                    btnUpdateLauncher.setEnabled(newer);
-                    if (!newer && bar.isIndeterminate()) {
-                        bar.setIndeterminate(false);
-                        bar.setValue(100);
-                        bar.setString("Up to date");
-                    }
-                });
-
-            } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> btnUpdateLauncher.setEnabled(false));
+    private void launchGame() {
+        try {
+            if (!Files.exists(GAME_JAR)) {
+                JOptionPane.showMessageDialog(this, "Game not installed yet.", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
             }
-        });
+            status.setText("Launching game…");
+            new ProcessBuilder(findJava(), "-jar", GAME_JAR.toString())
+                .directory(HOME_DIR.toFile()).inheritIO().start();
+            ui(() -> {
+                exec.shutdown();
+                setVisible(false);
+                dispose();
+                System.exit(0);
+            });
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Failed to start game: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
-    private void startUpdateLauncher() {
-        btnUpdateLauncher.setEnabled(false);
-        bar.setIndeterminate(true);
-        bar.setString(null);
-        status.setText("Downloading launcher " + launcherLatestVersion + "…");
+    // ------------------------ Networking / IO helpers ------------------------
 
-        exec.submit(() -> {
-            Path tmp = null;
-            try {
-                if (launcherLatestJarUrl == null) throw new IOException("No launcher asset URL.");
-                tmp = Files.createTempFile("tlob-launcher-", ".jar.part");
+    private String httpGetString(String url) throws IOException, InterruptedException {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
+            .header("User-Agent", USER_AGENT).timeout(Duration.ofSeconds(20)).GET();
+        String token = System.getenv("GITHUB_TOKEN");
+        if (token != null && !token.isBlank()) b.header("Authorization", "Bearer " + token.trim());
+        var resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) throw new IOException("GitHub API " + resp.statusCode());
+        return resp.body();
+    }
 
-                long contentLen = contentLength(launcherLatestJarUrl);
-                SwingUtilities.invokeLater(() -> {
-                    if (contentLen > 0) { bar.setIndeterminate(false); bar.setValue(0); }
-                });
-
-                HttpRequest req = HttpRequest.newBuilder(URI.create(launcherLatestJarUrl))
-                    .header("User-Agent", USER_AGENT)
-                    .timeout(Duration.ofMinutes(5))
-                    .GET().build();
-
-                Path finalTmp = tmp;
-                http.send(req, HttpResponse.BodyHandlers.ofInputStream()).body().transferTo(new OutputStream() {
-                    long read = 0;
-                    final OutputStream out = Files.newOutputStream(finalTmp, StandardOpenOption.TRUNCATE_EXISTING);
-                    @Override public void write(int b) throws IOException {
-                        out.write(b);
-                        if (contentLen > 0 && (++read % 8192 == 0)) updateProgress(read, contentLen);
-                    }
-                    @Override public void write(byte[] b, int off, int len) throws IOException {
-                        out.write(b, off, len);
-                        if (contentLen > 0) { read += len; updateProgress(read, contentLen); }
-                    }
-                    @Override public void close() throws IOException { out.close(); }
-                });
-
-                Files.createDirectories(HOME_DIR);
-                Path self = getSelfJarPath();
-
-                if (self != null && Files.isRegularFile(self) && Files.isSameFile(self, LAUNCHER_JAR)) {
-                    // Running from ~/.tlob/launcher.jar → stage and replace via script
-                    Path staged = HOME_DIR.resolve("launcher.jar.new");
-                    Files.move(tmp, staged, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-
-                    SwingUtilities.invokeLater(() -> {
-                        status.setText("Updating launcher… restarting.");
-                        bar.setIndeterminate(true);
-                    });
-
-                    writeAndRunSelfReplaceScript(staged, LAUNCHER_JAR, findJava());
-
-                    // Exit cleanly on the EDT (no interrupting the worker before dispose)
-                    SwingUtilities.invokeLater(() -> {
-                        exec.shutdown();
-                        setVisible(false);
-                        dispose();
-                        System.exit(0);
-                    });
-                    return;
-                }
-
-                // Otherwise, install to ~/.tlob/launcher.jar and start it
-                Files.move(tmp, LAUNCHER_JAR, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-
-                SwingUtilities.invokeLater(() -> {
-                    status.setText("Launcher installed. Restarting updated launcher…");
-                    bar.setValue(100);
-                    bar.setString("Done");
-                });
-
-                new ProcessBuilder(findJava(), "-jar", LAUNCHER_JAR.toString())
-                    .directory(HOME_DIR.toFile())
-                    .inheritIO()
-                    .start();
-
-                // Exit cleanly on the EDT
-                SwingUtilities.invokeLater(() -> {
-                    exec.shutdown();
-                    setVisible(false);
-                    dispose();
-                    System.exit(0);
-                });
-
-            } catch (Exception ex) {
-                if (tmp != null) try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
-                SwingUtilities.invokeLater(() -> {
-                    status.setText("Launcher update failed: " + ex.getMessage());
-                    btnUpdateLauncher.setEnabled(true);
-                    if (bar.isIndeterminate()) { bar.setIndeterminate(false); bar.setValue(0); }
-                });
+    /** Downloads the URL to a temp file while updating the progress bar; returns the temp path. */
+    private Path downloadToTemp(String url, String prefix) throws IOException, InterruptedException {
+        Path tmp = Files.createTempFile(prefix, ".jar.part");
+        long total = contentLength(url);
+        ui(() -> {
+            if (total > 0) {
+                bar.setIndeterminate(false);
+                bar.setValue(0);
+                bar.setString(null);
             }
         });
+
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+            .header("User-Agent", USER_AGENT).timeout(Duration.ofMinutes(5)).GET().build();
+
+        try (OutputStream out = new CountingOutputStream(Files.newOutputStream(tmp, StandardOpenOption.TRUNCATE_EXISTING), total)) {
+            http.send(req, HttpResponse.BodyHandlers.ofInputStream()).body().transferTo(out);
+        }
+        return tmp;
+    }
+
+    private class CountingOutputStream extends OutputStream {
+        private final OutputStream out;
+        private final long total;
+        private long read = 0;
+
+        CountingOutputStream(OutputStream out, long total) {
+            this.out = out;
+            this.total = total;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+            update(1);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+            update(len);
+        }
+
+        private void update(long bytes) {
+            if (total > 0) {
+                read += bytes;
+                int pct = (int) Math.max(0, Math.min(100, (read * 100) / Math.max(1, total)));
+                ui(() -> {
+                    bar.setValue(pct);
+                    bar.setString(pct + "%");
+                });
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            out.close();
+        }
+    }
+
+    private long contentLength(String url) {
+        try {
+            var req = HttpRequest.newBuilder(URI.create(url))
+                .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                .header("User-Agent", USER_AGENT).build();
+            var resp = http.send(req, HttpResponse.BodyHandlers.discarding());
+            String cl = resp.headers().firstValue("Content-Length").orElse(null);
+            if (cl != null) return Long.parseLong(cl);
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    // ------------------------ Misc ------------------------
+
+    private static String findJava() {
+        String home = System.getProperty("java.home");
+        Path bin = Path.of(home, "bin", (isWindows() ? "java.exe" : "java"));
+        return Files.exists(bin) ? bin.toString() : "java";
+    }
+
+    private static boolean isWindows() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        return os.contains("win");
     }
 
     private static Path getSelfJarPath() {
         try {
             var url = Launcher.class.getProtectionDomain().getCodeSource().getLocation();
             if (url == null) return null;
-            var uri = url.toURI();
-            Path p = Path.of(uri);
+            Path p = Path.of(url.toURI());
             return (Files.isRegularFile(p) && p.toString().toLowerCase().endsWith(".jar")) ? p : null;
         } catch (Exception e) {
             return null;
@@ -427,10 +453,8 @@ public class Launcher extends JFrame {
                 del "%~f0"
                 """;
             Files.writeString(bat, script);
-            new ProcessBuilder("cmd", "/c", "start", "", bat.toString(),
-                staged.toString(), dest.toString(), javaPath)
-                .inheritIO()
-                .start();
+            new ProcessBuilder("cmd", "/c", "start", "", bat.toString(), staged.toString(), dest.toString(), javaPath)
+                .inheritIO().start();
         } else {
             Path sh = Files.createTempFile("tlob-replace-", ".sh");
             String script = """
@@ -451,64 +475,17 @@ public class Launcher extends JFrame {
             Files.writeString(sh, script);
             sh.toFile().setExecutable(true);
             new ProcessBuilder(sh.toString(), staged.toString(), dest.toString(), javaPath)
-                .inheritIO()
-                .start();
+                .inheritIO().start();
         }
     }
 
-    // ------------------------ Common helpers ------------------------
-
-    private void updateProgress(long read, long total) {
-        int pct = (int) Math.max(0, Math.min(100, (read * 100) / Math.max(1, total)));
-        SwingUtilities.invokeLater(() -> {
-            bar.setValue(pct);
-            bar.setString(pct + "%");
-        });
-    }
-
-    private void launchGame() {
-        try {
-            if (!Files.exists(GAME_JAR)) {
-                JOptionPane.showMessageDialog(this, "Game not installed yet.", "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            status.setText("Launching game…");
-            new ProcessBuilder(findJava(), "-jar", GAME_JAR.toString())
-                .directory(HOME_DIR.toFile())
-                .inheritIO()
-                .start();
-
-            // Exit cleanly from the EDT
-            SwingUtilities.invokeLater(() -> {
-                exec.shutdown();
-                setVisible(false);
-                dispose();
-                System.exit(0);
-            });
-
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Failed to start game: " + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private static String findJava() {
-        String home = System.getProperty("java.home");
-        Path bin = Path.of(home, "bin", (isWindows() ? "java.exe" : "java"));
-        return Files.exists(bin) ? bin.toString() : "java";
-    }
-
-    private static boolean isWindows() {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        return os.contains("win");
-    }
+    // --- Tiny utils (kept inline to reduce file count) ---
 
     private static boolean isNewer(String remote, String local) {
-        String r = remote.startsWith("v") ? remote.substring(1) : remote;
-        String l = local.startsWith("v") ? local.substring(1) : local;
-
-        String[] a = r.split("\\.");
-        String[] b = l.split("\\.");
+        String r = remote != null && remote.startsWith("v") ? remote.substring(1) : String.valueOf(remote);
+        String l = local != null && local.startsWith("v") ? local.substring(1) : String.valueOf(local);
+        String[] a = (r == null ? "0" : r).split("\\.");
+        String[] b = (l == null ? "0" : l).split("\\.");
         int n = Math.max(a.length, b.length);
         for (int i = 0; i < n; i++) {
             int ai = (i < a.length) ? parseInt(a[i]) : 0;
@@ -519,8 +496,11 @@ public class Launcher extends JFrame {
     }
 
     private static int parseInt(String s) {
-        try { return Integer.parseInt(s.replaceAll("[^0-9].*$", "")); }
-        catch (Exception e) { return 0; }
+        try {
+            return Integer.parseInt(s.replaceAll("[^0-9].*$", ""));
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private static String extract(String json, String regex) {
@@ -537,16 +517,7 @@ public class Launcher extends JFrame {
         return null;
     }
 
-    private long contentLength(String url) {
-        try {
-            var req = HttpRequest.newBuilder(URI.create(url))
-                .method("HEAD", HttpRequest.BodyPublishers.noBody())
-                .header("User-Agent", USER_AGENT)
-                .build();
-            var resp = http.send(req, HttpResponse.BodyHandlers.discarding());
-            String cl = resp.headers().firstValue("Content-Length").orElse(null);
-            if (cl != null) return Long.parseLong(cl);
-        } catch (Exception ignored) {}
-        return -1;
+    private void ui(Runnable r) {
+        SwingUtilities.invokeLater(r);
     }
 }
