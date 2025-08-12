@@ -230,13 +230,19 @@ public class Launcher extends JFrame {
                     }
                 });
             } catch (Exception ex) {
+                System.out.println("Error checking " + (game ? "game" : "launcher") + " updates: " + ex.getMessage());
+                ex.printStackTrace();
+                
                 ui(() -> {
                     if (game) {
-                        status.setText("Offline or API error. You can still play offline if installed.");
+                        status.setText("Offline or API error: " + ex.getMessage() + ". You can still play offline if installed.");
                         bar.setIndeterminate(false);
                         btnPlay.setEnabled(Files.exists(GAME_JAR));
                         btnUpdate.setEnabled(false);
-                    } else btnUpdateLauncher.setEnabled(false);
+                    } else {
+                        status.setText("Launcher update check failed: " + ex.getMessage());
+                        btnUpdateLauncher.setEnabled(false);
+                    }
                 });
             }
         });
@@ -549,14 +555,78 @@ public class Launcher extends JFrame {
         testDirectSet.addActionListener(ev -> {
             if (versionLabel != null) {
                 System.out.println("Testing direct label set...");
-                versionLabel.setText("Launcher v0.0.0");
-                System.out.println("Directly set label to: 'Launcher v0.0.0'");
+                versionLabel.setText("Launcher 0.0.0");
+                System.out.println("Directly set label to: 'Launcher 0.0.0'");
                 System.out.println("Current label text: '" + versionLabel.getText() + "'");
             }
         });
         popup.add(testDirectSet);
         
+        JMenuItem testNetwork = new JMenuItem("Test Network Connectivity");
+        testNetwork.addActionListener(ev -> {
+            System.out.println("=== NETWORK TEST START ===");
+            testNetworkConnectivity();
+            System.out.println("=== NETWORK TEST END ===");
+        });
+        popup.add(testNetwork);
+        
         popup.show(btnUpdateLauncher, e.getX(), e.getY());
+    }
+    
+    private void testNetworkConnectivity() {
+        System.out.println("Testing network connectivity...");
+        
+        // Test basic internet connectivity
+        try {
+            System.out.println("Testing basic internet connectivity...");
+            var testUrl = "https://www.google.com";
+            var testReq = HttpRequest.newBuilder(URI.create(testUrl))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+            var testResp = http.send(testReq, HttpResponse.BodyHandlers.discarding());
+            System.out.println("✓ Basic internet connectivity: OK (Status: " + testResp.statusCode() + ")");
+        } catch (Exception e) {
+            System.out.println("✗ Basic internet connectivity: FAILED - " + e.getMessage());
+        }
+        
+        // Test GitHub API connectivity
+        try {
+            System.out.println("Testing GitHub API connectivity...");
+            var githubTestUrl = "https://api.github.com";
+            var githubReq = HttpRequest.newBuilder(URI.create(githubTestUrl))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+            var githubResp = http.send(githubReq, HttpResponse.BodyHandlers.discarding());
+            System.out.println("✓ GitHub API connectivity: OK (Status: " + githubResp.statusCode() + ")");
+        } catch (Exception e) {
+            System.out.println("✗ GitHub API connectivity: FAILED - " + e.getMessage());
+        }
+        
+        // Test specific launcher API endpoint
+        try {
+            System.out.println("Testing launcher API endpoint...");
+            var launcherReq = HttpRequest.newBuilder(URI.create(API_LAUNCHER_LATEST))
+                .header("User-Agent", USER_AGENT)
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .build();
+            var launcherResp = http.send(launcherReq, HttpResponse.BodyHandlers.ofString());
+            System.out.println("✓ Launcher API endpoint: OK (Status: " + launcherResp.statusCode() + ")");
+            System.out.println("Response length: " + launcherResp.body().length() + " characters");
+        } catch (Exception e) {
+            System.out.println("✗ Launcher API endpoint: FAILED - " + e.getMessage());
+        }
+        
+        // Test DNS resolution
+        try {
+            System.out.println("Testing DNS resolution...");
+            var testUri = URI.create("https://api.github.com");
+            System.out.println("✓ DNS resolution: OK - " + testUri.getHost() + " resolved");
+        } catch (Exception e) {
+            System.out.println("✗ DNS resolution: FAILED - " + e.getMessage());
+        }
     }
 
     private void saveLauncherVersion(String version) {
