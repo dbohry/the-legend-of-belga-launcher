@@ -81,7 +81,7 @@ public class Launcher extends JFrame {
         
         // Add version info panel
         var versionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        versionLabel = new JLabel("Launcher v" + launcherLocalVersion);
+        versionLabel = new JLabel("Launcher 0.0.0"); // Will be updated after version loading
         versionLabel.setForeground(Color.GRAY);
         versionLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
         versionLabel.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -145,7 +145,8 @@ public class Launcher extends JFrame {
         
         // Update version label after loading
         if (versionLabel != null) {
-            versionLabel.setText("Launcher v" + launcherLocalVersion);
+            System.out.println("Constructor: launcherLocalVersion = '" + launcherLocalVersion + "'");
+            versionLabel.setText("Launcher " + formatVersionDisplay(launcherLocalVersion));
         }
         
         // Debug logging for version detection
@@ -369,7 +370,8 @@ public class Launcher extends JFrame {
                 p.load(in);
                 String storedVersion = p.getProperty("version");
                 if (storedVersion != null && !storedVersion.isBlank()) {
-                    launcherLocalVersion = storedVersion.trim();
+                    // Clean the stored version - remove 'v' prefix if present
+                    launcherLocalVersion = storedVersion.startsWith("v") ? storedVersion.substring(1) : storedVersion.trim();
                     return;
                 }
             } catch (IOException ignored) {
@@ -379,25 +381,23 @@ public class Launcher extends JFrame {
         // Fallback: try to get version from package implementation
         String v = getClass().getPackage() != null ? getClass().getPackage().getImplementationVersion() : null;
         if (v != null && !v.isBlank()) {
-            launcherLocalVersion = v.trim();
+            launcherLocalVersion = v.startsWith("v") ? v.substring(1) : v.trim();
         } else {
             // If no version info available, check if we're running from a JAR file
             Path selfJar = getSelfJarPath();
             if (selfJar != null && Files.exists(selfJar)) {
-                // Try to extract version from JAR filename or use file modification time as fallback
+                // Try to extract version from JAR filename
                 String fileName = selfJar.getFileName().toString();
                 if (fileName.matches(".*v?\\d+\\.\\d+\\.\\d+.*")) {
-                    // Extract version from filename
+                    // Extract version from filename, remove 'v' prefix
                     Matcher matcher = Pattern.compile("v?(\\d+\\.\\d+\\.\\d+)").matcher(fileName);
                     if (matcher.find()) {
                         launcherLocalVersion = matcher.group(1);
                     }
                 } else {
-                    // Use a default version based on file existence
                     launcherLocalVersion = "1.0.0";
                 }
             } else {
-                // Last resort: use a reasonable default
                 launcherLocalVersion = "1.0.0";
             }
         }
@@ -450,15 +450,15 @@ public class Launcher extends JFrame {
                     props.load(in);
                     String version = props.getProperty("Implementation-Version");
                     if (version != null && !version.isBlank()) {
-                        return version.trim();
+                        // Clean the version - remove 'v' prefix if present
+                        return version.startsWith("v") ? version.substring(1) : version.trim();
                     }
                 }
             }
         } catch (Exception ignored) {
         }
         
-        // If all else fails, use a reasonable default based on current date or hardcoded version
-        // You can update this manually if needed
+        // If all else fails, use a reasonable default
         return "1.0.0";
     }
     
@@ -474,11 +474,12 @@ public class Launcher extends JFrame {
         JMenuItem setVersion = new JMenuItem("Set Current Version...");
         setVersion.addActionListener(ev -> {
             String input = JOptionPane.showInputDialog(this, 
-                "Enter current launcher version:", 
+                "Enter current launcher version (e.g., 0.0.6 or v0.0.6):", 
                 "Set Launcher Version", 
                 JOptionPane.QUESTION_MESSAGE);
             if (input != null && !input.trim().isEmpty()) {
-                launcherLocalVersion = input.trim();
+                // Clean the input - remove 'v' prefix if present
+                launcherLocalVersion = input.trim().startsWith("v") ? input.trim().substring(1) : input.trim();
                 saveLauncherVersion(launcherLocalVersion);
                 System.out.println("Manually set launcher version to: " + launcherLocalVersion);
                 // Re-check for updates
@@ -487,9 +488,9 @@ public class Launcher extends JFrame {
         });
         popup.add(setVersion);
         
-        JMenuItem setLatest = new JMenuItem("Set to Latest Known (v0.0.6)");
+        JMenuItem setLatest = new JMenuItem("Set to Latest Known (0.0.6)");
         setLatest.addActionListener(ev -> {
-            launcherLocalVersion = "v0.0.6";
+            launcherLocalVersion = "0.0.6";
             saveLauncherVersion(launcherLocalVersion);
             System.out.println("Set launcher version to latest known: " + launcherLocalVersion);
             // Re-check for updates
@@ -506,41 +507,95 @@ public class Launcher extends JFrame {
         
         JMenuItem resetVersion = new JMenuItem("Reset Version to Check Updates");
         resetVersion.addActionListener(ev -> {
+            System.out.println("=== RESET VERSION START ===");
+            System.out.println("Before reset: launcherLocalVersion = '" + launcherLocalVersion + "'");
             launcherLocalVersion = "0.0.0";
+            System.out.println("After reset: launcherLocalVersion = '" + launcherLocalVersion + "'");
             saveLauncherVersion(launcherLocalVersion);
-            System.out.println("Reset launcher version to 0.0.0 - will check for updates");
-            checkLatest(false);
+            System.out.println("After saveLauncherVersion: launcherLocalVersion = '" + launcherLocalVersion + "'");
+            
+            // Add a small delay to ensure UI updates are processed
+            Timer timer = new Timer(100, e2 -> {
+                System.out.println("Timer fired - calling checkLatest(false)...");
+                checkLatest(false);
+                System.out.println("=== RESET VERSION END ===");
+            });
+            timer.setRepeats(false);
+            timer.start();
         });
         popup.add(resetVersion);
         
         JMenuItem testVersion = new JMenuItem("Test Version Comparison");
         testVersion.addActionListener(ev -> {
             System.out.println("Testing version comparison:");
-            System.out.println("v0.0.6 vs " + launcherLocalVersion + " = " + isNewer("v0.0.6", launcherLocalVersion));
-            System.out.println("v0.0.5 vs " + launcherLocalVersion + " = " + isNewer("v0.0.5", launcherLocalVersion));
-            System.out.println("v0.0.4 vs " + launcherLocalVersion + " = " + isNewer("v0.0.4", launcherLocalVersion));
+            System.out.println("0.0.6 vs " + launcherLocalVersion + " = " + isNewer("0.0.6", launcherLocalVersion));
+            System.out.println("0.0.5 vs " + launcherLocalVersion + " = " + isNewer("0.0.5", launcherLocalVersion));
+            System.out.println("0.0.4 vs " + launcherLocalVersion + " = " + isNewer("0.0.4", launcherLocalVersion));
         });
         popup.add(testVersion);
+        
+        JMenuItem checkCurrentLabel = new JMenuItem("Check Current Label Text");
+        checkCurrentLabel.addActionListener(ev -> {
+            if (versionLabel != null) {
+                System.out.println("Current version label text: '" + versionLabel.getText() + "'");
+                System.out.println("Current launcherLocalVersion: '" + launcherLocalVersion + "'");
+            } else {
+                System.out.println("Version label is null");
+            }
+        });
+        popup.add(checkCurrentLabel);
+        
+        JMenuItem testDirectSet = new JMenuItem("Test Direct Label Set");
+        testDirectSet.addActionListener(ev -> {
+            if (versionLabel != null) {
+                System.out.println("Testing direct label set...");
+                versionLabel.setText("Launcher v0.0.0");
+                System.out.println("Directly set label to: 'Launcher v0.0.0'");
+                System.out.println("Current label text: '" + versionLabel.getText() + "'");
+            }
+        });
+        popup.add(testDirectSet);
         
         popup.show(btnUpdateLauncher, e.getX(), e.getY());
     }
 
     private void saveLauncherVersion(String version) {
+        System.out.println("saveLauncherVersion called with version: '" + version + "'");
+        
+        // Ensure we always save clean versions (without 'v' prefix)
+        String cleanVersion = version.startsWith("v") ? version.substring(1) : version;
+        
         try (var out = Files.newOutputStream(LAUNCHER_PROPS)) {
             var p = new Properties();
-            p.setProperty("version", version);
+            p.setProperty("version", cleanVersion);
             p.setProperty("path", LAUNCHER_JAR.toString());
             p.store(out, "TLOB Launcher installed version");
+            System.out.println("Saved clean version '" + cleanVersion + "' to properties file");
         } catch (IOException ignored) {
+            System.out.println("Failed to save version to properties file");
         }
         
-        // Update the UI
-        updateVersionLabel(version);
+        // Update the UI with the clean version
+        System.out.println("Calling updateVersionLabel with clean version: '" + cleanVersion + "'");
+        updateVersionLabel(cleanVersion);
+    }
+    
+    private String formatVersionDisplay(String version) {
+        if (version == null || version.isBlank()) return "0.0.0";
+        
+        // Clean the version string - remove any hidden characters and trim
+        String cleanVersion = version.trim();
+        
+        // Remove 'v' prefix if present, otherwise use as-is
+        String result = cleanVersion.startsWith("v") ? cleanVersion.substring(1) : cleanVersion;
+        
+        return result;
     }
     
     private void updateVersionLabel(String version) {
         if (versionLabel != null) {
-            ui(() -> versionLabel.setText("Launcher v" + version));
+            String displayText = "Launcher " + formatVersionDisplay(version);
+            ui(() -> versionLabel.setText(displayText));
         }
     }
 
@@ -725,7 +780,7 @@ public class Launcher extends JFrame {
         if (remote == null || remote.isBlank()) return false;
         if (local == null || local.isBlank()) return true;
         
-        // Remove 'v' prefix if present
+        // Remove 'v' prefix if present and clean versions
         String r = remote.startsWith("v") ? remote.substring(1) : remote;
         String l = local.startsWith("v") ? local.substring(1) : local;
         
@@ -733,8 +788,9 @@ public class Launcher extends JFrame {
         if (l.equals("999.999.999")) return false; // IDE mode - no updates
         if (r.equals("999.999.999")) return false; // Remote version is invalid
         
-        String[] a = r.split("\\.");
-        String[] b = l.split("\\.");
+        // Clean and parse version numbers
+        String[] a = r.trim().split("\\.");
+        String[] b = l.trim().split("\\.");
         int n = Math.max(a.length, b.length);
         
         for (int i = 0; i < n; i++) {
