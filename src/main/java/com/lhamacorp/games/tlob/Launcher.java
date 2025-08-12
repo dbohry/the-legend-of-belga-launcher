@@ -34,6 +34,7 @@ public class Launcher extends JFrame {
     private static final String API_LAUNCHER_LATEST =
         "https://api.github.com/repos/" + LAUNCHER_REPO + "/releases/latest";
     private static final Path LAUNCHER_JAR = HOME_DIR.resolve("launcher.jar");
+    private static final Path LAUNCHER_PROPS = HOME_DIR.resolve("launcher.properties");
 
     // --- UI ---
     private final JLabel status = new JLabel("Checking for updates…");
@@ -42,6 +43,7 @@ public class Launcher extends JFrame {
     private final JButton btnUpdate = new JButton("Update Game");
     private final JButton btnUpdateLauncher = new JButton("Update Launcher");
     private final JButton btnQuit = new JButton("Quit");
+    private JLabel versionLabel; // Will be initialized in constructor
 
     // --- State ---
     private final ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
@@ -76,6 +78,21 @@ public class Launcher extends JFrame {
         var top = new JPanel(new GridLayout(0, 1));
         top.add(new JLabel("<html><b>The Legend of Belga</b> — Auto Updater</html>"));
         top.add(status);
+        
+        // Add version info panel
+        var versionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        versionLabel = new JLabel("Launcher v" + launcherLocalVersion);
+        versionLabel.setForeground(Color.GRAY);
+        versionLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        versionLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                showLauncherVersionMenu(e);
+            }
+        });
+        versionPanel.add(versionLabel);
+        top.add(versionPanel);
+        
         panel.add(top, BorderLayout.NORTH);
 
         bar.setStringPainted(true);
@@ -91,6 +108,23 @@ public class Launcher extends JFrame {
         btnPlay.addActionListener(e -> launchGame());
         btnUpdate.addActionListener(e -> startUpdate(true));
         btnUpdateLauncher.addActionListener(e -> startUpdate(false));
+        
+        // Add right-click context menu for debugging
+        btnUpdateLauncher.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showLauncherVersionMenu(e);
+                }
+            }
+            
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showLauncherVersionMenu(e);
+                }
+            }
+        });
 
         btns.add(btnPlay);
         btns.add(btnUpdate);
@@ -108,6 +142,17 @@ public class Launcher extends JFrame {
 
         loadLocalVersion();
         loadLauncherLocalVersion();
+        
+        // Update version label after loading
+        if (versionLabel != null) {
+            versionLabel.setText("Launcher v" + launcherLocalVersion);
+        }
+        
+        // Debug logging for version detection
+        System.out.println("Launcher local version: " + launcherLocalVersion);
+        System.out.println("Game local version: " + localVersion);
+        System.out.println("Launcher repo: " + LAUNCHER_REPO);
+        System.out.println("Launcher API URL: " + API_LAUNCHER_LATEST);
 
         checkLatest(true);   // game
         checkLatest(false);  // launcher
@@ -131,9 +176,15 @@ public class Launcher extends JFrame {
         exec.submit(() -> {
             try {
                 String api = game ? API_LATEST : API_LAUNCHER_LATEST;
+                System.out.println("Checking " + (game ? "game" : "launcher") + " updates from: " + api);
+                
                 String json = httpGetString(api);
+                System.out.println("API response received, length: " + (json != null ? json.length() : "null"));
+                
                 String ver = extract(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
                 String url = extractFirstJarUrl(json);
+                
+                System.out.println("Extracted version: " + ver + ", URL: " + url);
 
                 if (game) {
                     latestVersion = ver;
@@ -163,11 +214,17 @@ public class Launcher extends JFrame {
                         if (!newer) bar.setString("Game up to date");
                     } else {
                         boolean newer = isNewer(ver, launcherLocalVersion);
+                        System.out.println("Launcher version check - Remote: " + ver + ", Local: " + launcherLocalVersion + ", Newer: " + newer);
                         btnUpdateLauncher.setEnabled(newer);
-                        if (!newer && bar.isIndeterminate()) {
-                            bar.setIndeterminate(false);
-                            bar.setValue(100);
-                            bar.setString("Up to date");
+                        if (!newer) {
+                            if (bar.isIndeterminate()) {
+                                bar.setIndeterminate(false);
+                                bar.setValue(100);
+                                bar.setString("Up to date");
+                            }
+                            System.out.println("Launcher is up to date - update button disabled");
+                        } else {
+                            System.out.println("Launcher update available - update button enabled");
                         }
                     }
                 });
@@ -213,6 +270,9 @@ public class Launcher extends JFrame {
                     if (self != null && Files.isRegularFile(self) && Files.isSameFile(self, LAUNCHER_JAR)) {
                         Path staged = HOME_DIR.resolve("launcher.jar.new");
                         Files.move(tmp, staged, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                        
+                        // Save the new version before restarting
+                        saveLauncherVersion(launcherLatestVersion);
 
                         ui(() -> {
                             status.setText("Updating launcher… restarting.");
@@ -228,6 +288,7 @@ public class Launcher extends JFrame {
                         return;
                     }
                     Files.move(tmp, LAUNCHER_JAR, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                    saveLauncherVersion(launcherLatestVersion);
                     ui(() -> {
                         status.setText("Launcher installed. Restarting updated launcher…");
                         bar.setValue(100);
@@ -301,8 +362,186 @@ public class Launcher extends JFrame {
     }
 
     private void loadLauncherLocalVersion() {
+        // First try to get version from properties file (stored during previous updates)
+        if (Files.exists(LAUNCHER_PROPS)) {
+            try (var in = Files.newInputStream(LAUNCHER_PROPS)) {
+                var p = new Properties();
+                p.load(in);
+                String storedVersion = p.getProperty("version");
+                if (storedVersion != null && !storedVersion.isBlank()) {
+                    launcherLocalVersion = storedVersion.trim();
+                    return;
+                }
+            } catch (IOException ignored) {
+            }
+        }
+        
+        // Fallback: try to get version from package implementation
         String v = getClass().getPackage() != null ? getClass().getPackage().getImplementationVersion() : null;
-        if (v != null && !v.isBlank()) launcherLocalVersion = v.trim();
+        if (v != null && !v.isBlank()) {
+            launcherLocalVersion = v.trim();
+        } else {
+            // If no version info available, check if we're running from a JAR file
+            Path selfJar = getSelfJarPath();
+            if (selfJar != null && Files.exists(selfJar)) {
+                // Try to extract version from JAR filename or use file modification time as fallback
+                String fileName = selfJar.getFileName().toString();
+                if (fileName.matches(".*v?\\d+\\.\\d+\\.\\d+.*")) {
+                    // Extract version from filename
+                    Matcher matcher = Pattern.compile("v?(\\d+\\.\\d+\\.\\d+)").matcher(fileName);
+                    if (matcher.find()) {
+                        launcherLocalVersion = matcher.group(1);
+                    }
+                } else {
+                    // Use a default version based on file existence
+                    launcherLocalVersion = "1.0.0";
+                }
+            } else {
+                // Last resort: use a reasonable default
+                launcherLocalVersion = "1.0.0";
+            }
+        }
+        
+        // If we still don't have a proper version, try to set it based on the current launcher
+        if (launcherLocalVersion.equals("0.0.0") || launcherLocalVersion.equals("1.0.0")) {
+            // Try to get version from MANIFEST.MF or set a reasonable default
+            launcherLocalVersion = getCurrentLauncherVersion();
+        }
+        
+        // Always allow updates unless we have a very specific reason not to
+        if (isRunningFromIDE() && launcherLocalVersion.equals("0.0.0")) {
+            System.out.println("Running from IDE/class files with no version info - setting default version");
+            launcherLocalVersion = "0.0.1"; // Set to a low version to allow updates
+        } else if (isRunningFromIDE()) {
+            System.out.println("Running from IDE/class files but version detected: " + launcherLocalVersion);
+        }
+        
+        System.out.println("Final launcher local version: " + launcherLocalVersion);
+    }
+    
+    private boolean isRunningFromIDE() {
+        // Check if we're running from compiled class files instead of a JAR
+        Path selfJar = getSelfJarPath();
+        if (selfJar == null) {
+            // No JAR file found, likely running from IDE
+            return true;
+        }
+        
+        // Check if the path contains common IDE build directories
+        String path = selfJar.toString().toLowerCase();
+        boolean isDevPath = path.contains("target") || path.contains("build") || path.contains("out") || 
+                           path.contains("bin") || path.contains("classes") || path.endsWith(".class");
+        
+        // Only consider it IDE if we also can't get version from MANIFEST or other sources
+        if (isDevPath) {
+            System.out.println("Detected development path: " + path);
+        }
+        
+        return isDevPath;
+    }
+    
+    private String getCurrentLauncherVersion() {
+        try {
+            // Try to read from MANIFEST.MF
+            var url = Launcher.class.getResource("/META-INF/MANIFEST.MF");
+            if (url != null) {
+                try (var in = url.openStream()) {
+                    var props = new Properties();
+                    props.load(in);
+                    String version = props.getProperty("Implementation-Version");
+                    if (version != null && !version.isBlank()) {
+                        return version.trim();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        
+        // If all else fails, use a reasonable default based on current date or hardcoded version
+        // You can update this manually if needed
+        return "1.0.0";
+    }
+    
+    private void showLauncherVersionMenu(java.awt.event.MouseEvent e) {
+        JPopupMenu popup = new JPopupMenu();
+        
+        JMenuItem currentVersion = new JMenuItem("Current: " + launcherLocalVersion);
+        currentVersion.setEnabled(false);
+        popup.add(currentVersion);
+        
+        popup.addSeparator();
+        
+        JMenuItem setVersion = new JMenuItem("Set Current Version...");
+        setVersion.addActionListener(ev -> {
+            String input = JOptionPane.showInputDialog(this, 
+                "Enter current launcher version:", 
+                "Set Launcher Version", 
+                JOptionPane.QUESTION_MESSAGE);
+            if (input != null && !input.trim().isEmpty()) {
+                launcherLocalVersion = input.trim();
+                saveLauncherVersion(launcherLocalVersion);
+                System.out.println("Manually set launcher version to: " + launcherLocalVersion);
+                // Re-check for updates
+                checkLatest(false);
+            }
+        });
+        popup.add(setVersion);
+        
+        JMenuItem setLatest = new JMenuItem("Set to Latest Known (v0.0.6)");
+        setLatest.addActionListener(ev -> {
+            launcherLocalVersion = "v0.0.6";
+            saveLauncherVersion(launcherLocalVersion);
+            System.out.println("Set launcher version to latest known: " + launcherLocalVersion);
+            // Re-check for updates
+            checkLatest(false);
+        });
+        popup.add(setLatest);
+        
+        JMenuItem forceCheck = new JMenuItem("Force Update Check");
+        forceCheck.addActionListener(ev -> {
+            System.out.println("Forcing update check...");
+            checkLatest(false);
+        });
+        popup.add(forceCheck);
+        
+        JMenuItem resetVersion = new JMenuItem("Reset Version to Check Updates");
+        resetVersion.addActionListener(ev -> {
+            launcherLocalVersion = "0.0.0";
+            saveLauncherVersion(launcherLocalVersion);
+            System.out.println("Reset launcher version to 0.0.0 - will check for updates");
+            checkLatest(false);
+        });
+        popup.add(resetVersion);
+        
+        JMenuItem testVersion = new JMenuItem("Test Version Comparison");
+        testVersion.addActionListener(ev -> {
+            System.out.println("Testing version comparison:");
+            System.out.println("v0.0.6 vs " + launcherLocalVersion + " = " + isNewer("v0.0.6", launcherLocalVersion));
+            System.out.println("v0.0.5 vs " + launcherLocalVersion + " = " + isNewer("v0.0.5", launcherLocalVersion));
+            System.out.println("v0.0.4 vs " + launcherLocalVersion + " = " + isNewer("v0.0.4", launcherLocalVersion));
+        });
+        popup.add(testVersion);
+        
+        popup.show(btnUpdateLauncher, e.getX(), e.getY());
+    }
+
+    private void saveLauncherVersion(String version) {
+        try (var out = Files.newOutputStream(LAUNCHER_PROPS)) {
+            var p = new Properties();
+            p.setProperty("version", version);
+            p.setProperty("path", LAUNCHER_JAR.toString());
+            p.store(out, "TLOB Launcher installed version");
+        } catch (IOException ignored) {
+        }
+        
+        // Update the UI
+        updateVersionLabel(version);
+    }
+    
+    private void updateVersionLabel(String version) {
+        if (versionLabel != null) {
+            ui(() -> versionLabel.setText("Launcher v" + version));
+        }
     }
 
     private void launchGame() {
@@ -482,11 +721,22 @@ public class Launcher extends JFrame {
     // --- Tiny utils (kept inline to reduce file count) ---
 
     private static boolean isNewer(String remote, String local) {
-        String r = remote != null && remote.startsWith("v") ? remote.substring(1) : String.valueOf(remote);
-        String l = local != null && local.startsWith("v") ? local.substring(1) : String.valueOf(local);
-        String[] a = (r == null ? "0" : r).split("\\.");
-        String[] b = (l == null ? "0" : l).split("\\.");
+        // Handle null cases
+        if (remote == null || remote.isBlank()) return false;
+        if (local == null || local.isBlank()) return true;
+        
+        // Remove 'v' prefix if present
+        String r = remote.startsWith("v") ? remote.substring(1) : remote;
+        String l = local.startsWith("v") ? local.substring(1) : local;
+        
+        // Handle special cases
+        if (l.equals("999.999.999")) return false; // IDE mode - no updates
+        if (r.equals("999.999.999")) return false; // Remote version is invalid
+        
+        String[] a = r.split("\\.");
+        String[] b = l.split("\\.");
         int n = Math.max(a.length, b.length);
+        
         for (int i = 0; i < n; i++) {
             int ai = (i < a.length) ? parseInt(a[i]) : 0;
             int bi = (i < b.length) ? parseInt(b[i]) : 0;
