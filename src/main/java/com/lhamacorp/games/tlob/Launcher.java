@@ -1,5 +1,12 @@
 package com.lhamacorp.games.tlob;
 
+/**
+ * The Legend of Belga Launcher
+ * 
+ * IMPORTANT: Keep LATEST_KNOWN_VERSION constant in sync with the version in build.gradle
+ * 
+ * @author dbohry
+ */
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
@@ -35,6 +42,10 @@ public class Launcher extends JFrame {
         "https://api.github.com/repos/" + LAUNCHER_REPO + "/releases/latest";
     private static final Path LAUNCHER_JAR = HOME_DIR.resolve("launcher.jar");
     private static final Path LAUNCHER_PROPS = HOME_DIR.resolve("launcher.properties");
+    
+    // IMPORTANT: This version must match the version in build.gradle
+    // Update this constant whenever you update the project version
+    private static final String LATEST_KNOWN_VERSION = "0.0.8";
 
     // --- UI ---
     private final JLabel status = new JLabel("Checking for updates…");
@@ -480,7 +491,7 @@ public class Launcher extends JFrame {
         JMenuItem setVersion = new JMenuItem("Set Current Version...");
         setVersion.addActionListener(ev -> {
             String input = JOptionPane.showInputDialog(this, 
-                "Enter current launcher version (e.g., 0.0.6 or v0.0.6):", 
+                "Enter current launcher version (e.g., " + LATEST_KNOWN_VERSION + " or v" + LATEST_KNOWN_VERSION + "):", 
                 "Set Launcher Version", 
                 JOptionPane.QUESTION_MESSAGE);
             if (input != null && !input.trim().isEmpty()) {
@@ -494,9 +505,9 @@ public class Launcher extends JFrame {
         });
         popup.add(setVersion);
         
-        JMenuItem setLatest = new JMenuItem("Set to Latest Known (0.0.6)");
+        JMenuItem setLatest = new JMenuItem("Set to Latest Known (" + LATEST_KNOWN_VERSION + ")");
         setLatest.addActionListener(ev -> {
-            launcherLocalVersion = "0.0.6";
+            launcherLocalVersion = LATEST_KNOWN_VERSION;
             saveLauncherVersion(launcherLocalVersion);
             System.out.println("Set launcher version to latest known: " + launcherLocalVersion);
             // Re-check for updates
@@ -534,7 +545,7 @@ public class Launcher extends JFrame {
         JMenuItem testVersion = new JMenuItem("Test Version Comparison");
         testVersion.addActionListener(ev -> {
             System.out.println("Testing version comparison:");
-            System.out.println("0.0.6 vs " + launcherLocalVersion + " = " + isNewer("0.0.6", launcherLocalVersion));
+            System.out.println(LATEST_KNOWN_VERSION + " vs " + launcherLocalVersion + " = " + isNewer(LATEST_KNOWN_VERSION, launcherLocalVersion));
             System.out.println("0.0.5 vs " + launcherLocalVersion + " = " + isNewer("0.0.5", launcherLocalVersion));
             System.out.println("0.0.4 vs " + launcherLocalVersion + " = " + isNewer("0.0.4", launcherLocalVersion));
         });
