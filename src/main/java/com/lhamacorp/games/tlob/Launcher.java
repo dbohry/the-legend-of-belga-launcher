@@ -50,11 +50,13 @@ public class Launcher extends JFrame {
     // --- UI ---
     private final JLabel status = new JLabel("Checking for updates…");
     private final JProgressBar bar = new JProgressBar(0, 100);
-    private final JButton btnPlay = new JButton("Play");
+    private final JButton btnPlay = new JButton("PLAY");
     private final JButton btnUpdate = new JButton("Update Game");
     private final JButton btnUpdateLauncher = new JButton("Update Launcher");
     private final JButton btnQuit = new JButton("Quit");
     private JLabel versionLabel; // Will be initialized in constructor
+    private JLabel logoLabel; // Logo display
+    private JPanel mainPanel; // Main content panel
 
     // --- State ---
     private final ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
@@ -82,68 +84,29 @@ public class Launcher extends JFrame {
     public Launcher() {
         super("The Legend of Belga — Launcher");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-        setSize(500, 240);
-        setLayout(new BorderLayout(12, 12));
-
-        var panel = new JPanel(new BorderLayout(8, 8));
-        var top = new JPanel(new GridLayout(0, 1));
-        top.add(new JLabel("<html><b>The Legend of Belga</b> — Auto Updater</html>"));
-        top.add(status);
+        setSize(700, 500);
+        setMinimumSize(new Dimension(600, 400));
+        setLayout(new BorderLayout());
         
-        // Add version info panel
-        var versionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        versionLabel = new JLabel("Launcher 0.0.0"); // Will be updated after version loading
-        versionLabel.setForeground(Color.GRAY);
-        versionLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        versionLabel.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent e) {
-                showLauncherVersionMenu(e);
-            }
-        });
-        versionPanel.add(versionLabel);
-        top.add(versionPanel);
+        // Set background color
+        getContentPane().setBackground(new Color(30, 30, 35));
         
-        panel.add(top, BorderLayout.NORTH);
-
-        bar.setStringPainted(true);
-        bar.setIndeterminate(true);
-        panel.add(bar, BorderLayout.CENTER);
-
-        var btns = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        btnPlay.setEnabled(false);
-        btnUpdate.setEnabled(false);
-        btnUpdateLauncher.setEnabled(false);
-
-        btnQuit.addActionListener(e -> System.exit(0));
-        btnPlay.addActionListener(e -> launchGame());
-        btnUpdate.addActionListener(e -> startUpdate(true));
-        btnUpdateLauncher.addActionListener(e -> startUpdate(false));
+        // Create main panel with dark theme
+        mainPanel = new JPanel();
+        mainPanel.setLayout(new BorderLayout(20, 20));
+        mainPanel.setBackground(new Color(30, 30, 35));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
-        // Add right-click context menu for debugging
-        btnUpdateLauncher.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mousePressed(java.awt.event.MouseEvent e) {
-                if (e.isPopupTrigger()) {
-                    showLauncherVersionMenu(e);
-                }
-            }
-            
-            @Override
-            public void mouseReleased(java.awt.event.MouseEvent e) {
-                if (e.isPopupTrigger()) {
-                    showLauncherVersionMenu(e);
-                }
-            }
-        });
-
-        btns.add(btnPlay);
-        btns.add(btnUpdate);
-        btns.add(btnUpdateLauncher);
-        btns.add(btnQuit);
-
-        add(panel, BorderLayout.CENTER);
-        add(btns, BorderLayout.SOUTH);
+        // Create header with logo and title
+        createHeader();
+        
+        // Create center content
+        createCenterContent();
+        
+        // Create footer with buttons
+        createFooter();
+        
+        add(mainPanel);
         setLocationRelativeTo(null);
 
         try {
@@ -173,6 +136,210 @@ public class Launcher extends JFrame {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
                 exec.shutdown();
+            }
+        });
+    }
+    
+    private void createHeader() {
+        JPanel headerPanel = new JPanel(new BorderLayout(15, 10));
+        headerPanel.setBackground(new Color(30, 30, 35));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
+        
+        // Logo panel (left side)
+        JPanel logoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        logoPanel.setBackground(new Color(30, 30, 35));
+        
+        try {
+            // Load and resize logo
+            ImageIcon originalIcon = new ImageIcon(getClass().getResource("/TLOB-logo.png"));
+            Image originalImage = originalIcon.getImage();
+            Image resizedImage = originalImage.getScaledInstance(80, 80, Image.SCALE_SMOOTH);
+            ImageIcon resizedIcon = new ImageIcon(resizedImage);
+            
+            logoLabel = new JLabel(resizedIcon);
+            logoPanel.add(logoLabel);
+        } catch (Exception e) {
+            // Fallback if logo can't be loaded
+            logoLabel = new JLabel("TLOB");
+            logoLabel.setFont(new Font("Arial", Font.BOLD, 24));
+            logoLabel.setForeground(new Color(255, 215, 0));
+            logoPanel.add(logoLabel);
+        }
+        
+        // Title and subtitle panel (right side)
+        JPanel titlePanel = new JPanel(new GridLayout(0, 1, 0, 5));
+        titlePanel.setBackground(new Color(30, 30, 35));
+        
+        JLabel titleLabel = new JLabel("The Legend of Belga");
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 28));
+        titleLabel.setForeground(new Color(255, 255, 255));
+        
+        JLabel subtitleLabel = new JLabel("Game Launcher");
+        subtitleLabel.setFont(new Font("Arial", Font.PLAIN, 16));
+        subtitleLabel.setForeground(new Color(180, 180, 180));
+        
+        titlePanel.add(titleLabel);
+        titlePanel.add(subtitleLabel);
+        
+        headerPanel.add(logoPanel, BorderLayout.WEST);
+        headerPanel.add(titlePanel, BorderLayout.CENTER);
+        
+        mainPanel.add(headerPanel, BorderLayout.NORTH);
+    }
+    
+    private void createCenterContent() {
+        JPanel centerPanel = new JPanel(new BorderLayout(15, 15));
+        centerPanel.setBackground(new Color(40, 40, 45));
+        centerPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(60, 60, 65), 1),
+            BorderFactory.createEmptyBorder(20, 20, 20, 20)
+        ));
+        
+        // Status and progress section
+        JPanel statusPanel = new JPanel(new GridLayout(0, 1, 0, 10));
+        statusPanel.setBackground(new Color(40, 40, 45));
+        
+        // Status label with better styling
+        status.setFont(new Font("Arial", Font.PLAIN, 14));
+        status.setForeground(new Color(220, 220, 220));
+        status.setHorizontalAlignment(SwingConstants.CENTER);
+        
+        // Progress bar styling
+        bar.setPreferredSize(new Dimension(0, 25));
+        bar.setBackground(new Color(50, 50, 55));
+        bar.setForeground(new Color(0, 150, 255));
+        bar.setBorder(BorderFactory.createLineBorder(new Color(60, 60, 65), 1));
+        bar.setStringPainted(true);
+        bar.setIndeterminate(true);
+        
+        // Version info panel
+        JPanel versionPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        versionPanel.setBackground(new Color(40, 40, 45));
+        versionLabel = new JLabel("Launcher 0.0.0");
+        versionLabel.setFont(new Font("Arial", Font.PLAIN, 12));
+        versionLabel.setForeground(new Color(150, 150, 150));
+        versionLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        versionLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                showLauncherVersionMenu(e);
+            }
+        });
+        versionPanel.add(versionLabel);
+        
+        statusPanel.add(status);
+        statusPanel.add(bar);
+        statusPanel.add(versionPanel);
+        
+        centerPanel.add(statusPanel, BorderLayout.CENTER);
+        
+        mainPanel.add(centerPanel, BorderLayout.CENTER);
+    }
+    
+    private void createFooter() {
+        JPanel footerPanel = new JPanel(new BorderLayout(15, 0));
+        footerPanel.setBackground(new Color(30, 30, 35));
+        footerPanel.setBorder(BorderFactory.createEmptyBorder(20, 0, 0, 0));
+        
+        // Left side - Play button (prominent)
+        JPanel playPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        playPanel.setBackground(new Color(30, 30, 35));
+        
+        // Style the Play button to be prominent
+        btnPlay.setPreferredSize(new Dimension(200, 60));
+        btnPlay.setFont(new Font("Arial", Font.BOLD, 24));
+        btnPlay.setBackground(new Color(0, 150, 0));
+        btnPlay.setForeground(Color.WHITE);
+        btnPlay.setBorder(BorderFactory.createRaisedBevelBorder());
+        btnPlay.setFocusPainted(false);
+        btnPlay.setEnabled(false);
+        
+        // Add hover effect
+        btnPlay.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (btnPlay.isEnabled()) {
+                    btnPlay.setBackground(new Color(0, 180, 0));
+                }
+            }
+            
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                if (btnPlay.isEnabled()) {
+                    btnPlay.setBackground(new Color(0, 150, 0));
+                }
+            }
+        });
+        
+        playPanel.add(btnPlay);
+        
+        // Right side - other buttons
+        JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        buttonsPanel.setBackground(new Color(30, 30, 35));
+        
+        // Style other buttons
+        styleButton(btnUpdate, new Color(70, 70, 75), Color.WHITE);
+        styleButton(btnUpdateLauncher, new Color(70, 70, 75), Color.WHITE);
+        styleButton(btnQuit, new Color(120, 40, 40), Color.WHITE);
+        
+        btnUpdate.setEnabled(false);
+        btnUpdateLauncher.setEnabled(false);
+        
+        buttonsPanel.add(btnUpdate);
+        buttonsPanel.add(btnUpdateLauncher);
+        buttonsPanel.add(btnQuit);
+        
+        footerPanel.add(playPanel, BorderLayout.WEST);
+        footerPanel.add(buttonsPanel, BorderLayout.EAST);
+        
+        mainPanel.add(footerPanel, BorderLayout.SOUTH);
+        
+        // Add action listeners
+        btnQuit.addActionListener(e -> System.exit(0));
+        btnPlay.addActionListener(e -> launchGame());
+        btnUpdate.addActionListener(e -> startUpdate(true));
+        btnUpdateLauncher.addActionListener(e -> startUpdate(false));
+        
+        // Add right-click context menu for debugging
+        btnUpdateLauncher.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showLauncherVersionMenu(e);
+                }
+            }
+            
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showLauncherVersionMenu(e);
+                }
+            }
+        });
+    }
+    
+    private void styleButton(JButton button, Color bgColor, Color fgColor) {
+        button.setPreferredSize(new Dimension(120, 35));
+        button.setFont(new Font("Arial", Font.PLAIN, 12));
+        button.setBackground(bgColor);
+        button.setForeground(fgColor);
+        button.setBorder(BorderFactory.createRaisedBevelBorder());
+        button.setFocusPainted(false);
+        
+        // Add hover effect
+        button.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (button.isEnabled()) {
+                    button.setBackground(bgColor.brighter());
+                }
+            }
+            
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                if (button.isEnabled()) {
+                    button.setBackground(bgColor);
+                }
             }
         });
     }
