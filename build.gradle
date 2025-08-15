@@ -6,6 +6,11 @@ plugins {
 group = 'com.lhamacorp.games'
 version = '0.0.12'
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
 repositories {
     mavenCentral()
 }
