@@ -672,16 +672,6 @@ public class Launcher extends JFrame {
         });
         popup.add(setVersion);
         
-        JMenuItem setLatest = new JMenuItem("Set to Latest Known (" + LATEST_KNOWN_VERSION + ")");
-        setLatest.addActionListener(ev -> {
-            launcherLocalVersion = LATEST_KNOWN_VERSION;
-            saveLauncherVersion(launcherLocalVersion);
-            System.out.println("Set launcher version to latest known: " + launcherLocalVersion);
-            // Re-check for updates
-            checkLatest(false);
-        });
-        popup.add(setLatest);
-        
         JMenuItem forceCheck = new JMenuItem("Force Update Check");
         forceCheck.addActionListener(ev -> {
             System.out.println("Forcing update check...");
@@ -708,37 +698,6 @@ public class Launcher extends JFrame {
             timer.start();
         });
         popup.add(resetVersion);
-        
-        JMenuItem testVersion = new JMenuItem("Test Version Comparison");
-        testVersion.addActionListener(ev -> {
-            System.out.println("Testing version comparison:");
-            System.out.println(LATEST_KNOWN_VERSION + " vs " + launcherLocalVersion + " = " + isNewer(LATEST_KNOWN_VERSION, launcherLocalVersion));
-            System.out.println("0.0.5 vs " + launcherLocalVersion + " = " + isNewer("0.0.5", launcherLocalVersion));
-            System.out.println("0.0.4 vs " + launcherLocalVersion + " = " + isNewer("0.0.4", launcherLocalVersion));
-        });
-        popup.add(testVersion);
-        
-        JMenuItem checkCurrentLabel = new JMenuItem("Check Current Label Text");
-        checkCurrentLabel.addActionListener(ev -> {
-            if (versionLabel != null) {
-                System.out.println("Current version label text: '" + versionLabel.getText() + "'");
-                System.out.println("Current launcherLocalVersion: '" + launcherLocalVersion + "'");
-            } else {
-                System.out.println("Version label is null");
-            }
-        });
-        popup.add(checkCurrentLabel);
-        
-        JMenuItem testDirectSet = new JMenuItem("Test Direct Label Set");
-        testDirectSet.addActionListener(ev -> {
-            if (versionLabel != null) {
-                System.out.println("Testing direct label set...");
-                versionLabel.setText("Launcher 0.0.0");
-                System.out.println("Directly set label to: 'Launcher 0.0.0'");
-                System.out.println("Current label text: '" + versionLabel.getText() + "'");
-            }
-        });
-        popup.add(testDirectSet);
         
         JMenuItem testNetwork = new JMenuItem("Test Network Connectivity");
         testNetwork.addActionListener(ev -> {
